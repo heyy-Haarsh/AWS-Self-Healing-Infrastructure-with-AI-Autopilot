@@ -1,0 +1,16 @@
+# Terraform state — never commit, contains all resource details
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+
+# Variable files that may contain secrets
+*.tfvars
+
+# SSH private keys — NEVER commit
+*.pem
+kumud-key
+id_rsa
+
+# macOS
+.DS_Store
