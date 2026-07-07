@@ -63,13 +63,13 @@ def lambda_handler(event, context):
     duplicate remediation if EventBridge delivers the same event twice.
     """
 
-    # ── 1. PARSE PAYLOAD ─────────────────────────────────────────────────────
-    # Keys match EXACTLY what Kumud's input_transformer emits (eventbridge.tf L100-106)
-    alarm_name         = event.get("alarmName", "Unknown-Alarm")
-    alarm_state        = event.get("newState",  "UNKNOWN")
-    target_instance_id = event.get("instanceId")
-    region             = event.get("region",    REGION)
-    source             = event.get("source",    "Unknown")
+    # ── 1. PARSE PAYLOAD (raw EventBridge event, no input_transformer) ──────────
+    detail              = event.get("detail", {})
+    alarm_name          = detail.get("alarmName", "Unknown-Alarm")
+    alarm_state         = detail.get("state", {}).get("value", "UNKNOWN")
+    target_instance_id  = os.environ.get("TARGET_INSTANCE_ID")
+    region              = event.get("region", REGION)
+    source              = event.get("source", "aws.cloudwatch")
 
     print(f"🚨 Event received from: {source}")
     print(f"🔔 Alarm [{alarm_name}] → state: [{alarm_state}]")
@@ -116,7 +116,7 @@ def lambda_handler(event, context):
             },
             # Idempotency token — prevents duplicate execution if EventBridge
             # retries. Lambda request ID is unique per invocation attempt.
-            ClientToken=context.aws_request_id,
+            #ClientToken=context.aws_request_id,
             TimeoutSeconds=60,
             Comment=f"Self-healing: triggered by alarm {alarm_name}",
         )

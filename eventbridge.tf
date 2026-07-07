@@ -80,31 +80,8 @@ resource "aws_cloudwatch_event_rule" "nginx_alarm_rule" {
 resource "aws_cloudwatch_event_target" "lambda_target" {
   rule = aws_cloudwatch_event_rule.nginx_alarm_rule.name
 
-  # The ARN of your teammate's Lambda function.
-  # This is currently a PLACEHOLDER — update variables.tf once
-  # your teammate shares the real ARN, then re-run terraform apply.
-  arn = var.lambda_function_arn
-
-  # input_transformer customizes WHAT data gets sent to the Lambda.
-  # Without this, Lambda would receive the raw, messy AWS event.
-  # With this, we send a clean, simple JSON payload instead.
-  input_transformer {
-    # input_paths: pull specific fields OUT of the raw event
-    input_paths = {
-      alarmName = "$.detail.alarmName"   # e.g. "Synthetics-Alarm-nginx-health-checker-1"
-      newState  = "$.detail.state.value" # e.g. "ALARM"
-    }
-
-    # input_template: build the clean JSON payload sent to Lambda,
-    # using the values extracted above (referenced as <alarmName> etc.)
-    input_template = jsonencode({
-      alarmName  = "<alarmName>"
-      newState   = "<newState>"
-      instanceId = aws_instance.kumud_ec2.id # so Lambda knows WHICH EC2 to heal
-      region     = var.aws_region
-      source     = "kumud-eventbridge-rule"
-    })
-  }
+  # CHANGED: was var.lambda_function_arn (the cwsyn- placeholder)
+  arn = aws_lambda_function.orchestrator.arn
 }
 
 
@@ -122,7 +99,10 @@ resource "aws_cloudwatch_event_target" "lambda_target" {
 resource "aws_lambda_permission" "allow_eventbridge_invoke" {
   statement_id  = "AllowKumudEventBridgeInvoke" # Unique ID for this permission
   action        = "lambda:InvokeFunction"        # What EventBridge is allowed to do
-  function_name = var.lambda_function_arn        # Which Lambda function
+
+  # CHANGED: was var.lambda_function_arn
+  function_name = aws_lambda_function.orchestrator.function_name
+
   principal     = "events.amazonaws.com"        # WHO gets this permission (EventBridge service)
 
   # Restrict this permission to ONLY be usable by our specific rule.
