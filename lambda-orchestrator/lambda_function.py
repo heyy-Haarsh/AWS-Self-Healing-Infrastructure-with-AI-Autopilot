@@ -109,7 +109,10 @@ def lambda_handler(event, context):
             DocumentName=SSM_DOCUMENT_NAME,
             Parameters={
                 # ── Member 3: swap out or extend this command list ──────────
-                "commands": ["sudo systemctl restart nginx"]
+                "commands":  [
+                    "sudo systemctl restart nginx",
+                    "sudo systemctl status nginx --no-pager"
+                ]
             },
             # Idempotency token — prevents duplicate execution if EventBridge
             # retries. Lambda request ID is unique per invocation attempt.

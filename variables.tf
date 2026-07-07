@@ -55,6 +55,6 @@ variable "cloudwatch_alarm_name" {
 variable "lambda_function_arn" {
   description = "ARN of the teammate's Lambda function that EventBridge will invoke"
   type        = string
-  default     = "arn:aws:lambda:ap-south-1:750545041118:function:PLACEHOLDER_LAMBDA_NAME"
+  default     = "arn:aws:lambda:ap-south-1:750545041118:function:cwsyn-nginx-health-checker-cc0f6d7a-7264-4d33-b955-3f67aa64e43c"
   # Update this default (or pass via -var flag) once you have the real ARN
 }

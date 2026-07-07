@@ -137,10 +137,11 @@ resource "aws_security_group" "kumud_sg" {
 #
 # After ~2-3 minutes, http://<public_ip> will show your website.
 resource "aws_instance" "kumud_ec2" {
-  ami                    = data.aws_ami.ubuntu.id        # Latest Ubuntu 22.04
+  ami                    = "ami-0326c8c1e2d6bf78c"       # Latest Ubuntu 22.04
   instance_type          = var.instance_type             # t2.micro
   key_name               = aws_key_pair.kumud_key.key_name
   vpc_security_group_ids = [aws_security_group.kumud_sg.id]
+  iam_instance_profile = aws_iam_instance_profile.ec2_ssm_profile.name
 
   # Read user_data.sh from the same folder and pass it to EC2.
   # This script runs once automatically on the very first boot.
