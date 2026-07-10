@@ -66,8 +66,8 @@ resource "aws_lambda_function" "orchestrator" {
 
   environment {
     variables = {
-      INCIDENT_BUCKET = "PLACEHOLDER_BUCKET"   # Member 5 will replace this later
-      SNS_TOPIC_ARN    = "PLACEHOLDER_SNS_ARN"  # Member 5 will replace this later
+      INCIDENT_BUCKET     = aws_s3_bucket.incident_vault.bucket
+      SNS_TOPIC_ARN       = aws_sns_topic.incident_alerts.arn
       TARGET_INSTANCE_ID  = aws_instance.kumud_ec2.id
     }
   }

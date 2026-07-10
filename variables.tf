@@ -46,3 +46,9 @@ variable "cloudwatch_alarm_name" {
   type        = string
   default     = "Synthetics-Alarm-nginx-health-checker-1"
 }
+
+variable "alert_email" {
+  description = "Email address to receive incident alerts via SNS"
+  type        = string
+  default     = "piyushcollege12@gmail.com" # Replace with actual email
+}
