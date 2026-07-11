@@ -173,7 +173,7 @@ $pending = (aws sns get-subscription-attributes `
     --output text 2>&1).Trim()
 Log "  PendingConfirmation: $pending"
 if ($pending -eq "true") {
-    Log "  [WARN] Email NOT confirmed - check piyushcollege12@gmail.com inbox!" "WARN"
+    Log "  [WARN] Email NOT confirmed - check your inbox for the AWS confirmation link!" "WARN"
     Log "         Click the AWS Notification - Subscription Confirmation link." "WARN"
 } else {
     Log "  [PASS] Email subscription confirmed - alerts will be delivered."
