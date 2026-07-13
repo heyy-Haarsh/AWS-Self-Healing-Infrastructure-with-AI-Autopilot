@@ -27,7 +27,7 @@ sns_client     = boto3.client("sns",             region_name=REGION)
 # CONSTANTS
 # ──────────────────────────────────────────────────────────────────────────────
 SSM_DOCUMENT_NAME  = "AWS-RunShellScript"
-BEDROCK_MODEL_ID   = "anthropic.claude-3-haiku-20240307-v1:0"
+BEDROCK_MODEL_ID   = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240307-v1:0")
 S3_BUCKET_NAME     = os.environ.get("INCIDENT_BUCKET", "PLACEHOLDER_BUCKET")
 SNS_TOPIC_ARN      = os.environ.get("SNS_TOPIC_ARN",   "PLACEHOLDER_SNS_ARN")
 
@@ -46,19 +46,39 @@ def analyze_incident(error_text: str) -> str:
     )
     
     try:
-        response = bedrock_client.invoke_model(
-            modelId=BEDROCK_MODEL_ID,
-            contentType="application/json",
-            accept="application/json",
-            body=json.dumps({
+        if BEDROCK_MODEL_ID.startswith("anthropic"):
+            body = json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
                 "max_tokens": 512,
                 "messages": [{"role": "user", "content": prompt_text}]
             })
+            response = bedrock_client.invoke_model(
+                modelId=BEDROCK_MODEL_ID,
+                contentType="application/json",
+                accept="application/json",
+                body=body
+            )
+            response_body = json.loads(response["body"].read())
+            return response_body["content"][0]["text"].strip()
+
+        body = json.dumps({
+            "inputText": prompt_text,
+            "textType": "text",
+            "maxTokenCount": 512,
+            "temperature": 0.0,
+            "topP": 1.0,
+        })
+        response = bedrock_client.invoke_model(
+            modelId=BEDROCK_MODEL_ID,
+            contentType="application/json",
+            accept="application/json",
+            body=body
         )
         response_body = json.loads(response["body"].read())
-        return response_body["content"][0]["text"].strip()
-    except ClientError as e:
+        if "results" in response_body and response_body["results"]:
+            return response_body["results"][0]["outputText"].strip()
+        raise ValueError("Unexpected Bedrock response format")
+    except Exception as e:
         print(f"⚠️  Bedrock analysis failed: {e}")
         return f"[Bedrock Analysis Failed: {str(e)}]"
 

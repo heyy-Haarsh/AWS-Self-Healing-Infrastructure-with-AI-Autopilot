@@ -50,5 +50,5 @@ variable "cloudwatch_alarm_name" {
 variable "alert_email" {
   description = "Email address to receive incident alerts via SNS"
   type        = string
-  default     = "" # Set your alert email here (do NOT commit real email to git)
+  default     = "[EMAIL_ADDRESS]" # Replace with actual email
 }

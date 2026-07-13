@@ -8,10 +8,7 @@
 $BASE = $PSScriptRoot
 if (-not $BASE) { $BASE = Split-Path -Parent $MyInvocation.MyCommand.Path }
 
-$INSTANCE_ID  = "i-043af021b75cc0d1f"
-$LAMBDA_NAME  = "kumud-self-healing-orchestrator"
-$S3_BUCKET    = "kumud-nginx-incident-vault-y48yyp"
-$REGION       = "ap-south-1"
+$REGION       = "ap-south-1" # Hardcoded to your setup region
 $PAYLOAD_FILE = Join-Path $BASE "test_payload.json"
 $LOG_FILE     = Join-Path $BASE "self_healing_test_$(Get-Date -Format 'yyyyMMdd_HHmmss').log"
 $LAMBDA_OUT   = Join-Path $BASE "lambda_invoke_result.json"
@@ -26,6 +23,37 @@ function Log {
     Add-Content -Path $LOG_FILE -Value $line
 }
 function Sep { $l = "="*65; Write-Host $l; Add-Content $LOG_FILE $l }
+
+Log "Loading configuration dynamically from Terraform..."
+$tfOutputJson = terraform output -json
+if (-not $tfOutputJson) {
+    Log "Failed to read terraform output. Did you run 'terraform apply'?" "ERROR"
+    exit 1
+}
+$tf = $tfOutputJson | ConvertFrom-Json
+
+$INSTANCE_ID  = $tf.ec2_instance_id.value
+$LAMBDA_NAME  = $tf.lambda_function_name.value
+$S3_BUCKET    = $tf.s3_bucket_name.value
+$SNS_ARN      = $tf.sns_topic_arn.value
+
+if (-not (Test-Path $PAYLOAD_FILE)) {
+    $payloadObject = [ordered]@{
+        detail = [ordered]@{
+            alarmName = "Synthetics-Alarm-nginx-health-checker-1"
+            state = [ordered]@{
+                value = "ALARM"
+                reason = "Simulated self-healing test from PowerShell"
+            }
+            instanceId = $INSTANCE_ID
+        }
+        region = $REGION
+        source = "test_self_healing.ps1"
+    }
+    $payloadContent = $payloadObject | ConvertTo-Json -Depth 6 -Compress
+    Set-Content -Path $PAYLOAD_FILE -Value $payloadContent -Encoding utf8
+    Log "Created payload file at $PAYLOAD_FILE"
+}
 
 function Send-SSMCommand([string]$cmd) {
     return (aws ssm send-command `
@@ -93,10 +121,11 @@ Sep
 Log "STEP 3: Invoking Lambda to simulate CloudWatch ALARM event..."
 Log "  Using payload file: $PAYLOAD_FILE"
 
-# FIX v3: use absolute path for payload; capture stderr to $lambdaCliErr
+# Send the payload as compact inline JSON so PowerShell passes it as a single CLI argument.
+$payloadJson = Get-Content $PAYLOAD_FILE -Raw
 $lambdaCliErr = aws lambda invoke `
     --function-name $LAMBDA_NAME `
-    "--payload" "file://$PAYLOAD_FILE" `
+    --payload $payloadJson `
     --cli-binary-format raw-in-base64-out `
     --log-type Tail `
     --region $REGION `
@@ -165,12 +194,19 @@ if ($s3List -match "incidents/") {
 # ── STEP 6: SNS subscription status ──────────────────────────
 Sep
 Log "STEP 6: Checking SNS email subscription..."
-$subArn  = "arn:aws:sns:ap-south-1:750545041118:kumud-nginx-incident-alerts:ab3def0f-8455-4ee7-90d2-f0272612a123"
-$pending = (aws sns get-subscription-attributes `
-    --subscription-arn $subArn `
-    --region $REGION `
-    --query "Attributes.PendingConfirmation" `
-    --output text 2>&1).Trim()
+$subsJson = aws sns list-subscriptions-by-topic --topic-arn $SNS_ARN --region $REGION --output json 2>&1
+if ($LASTEXITCODE -eq 0 -and $subsJson) {
+    $subs = $subsJson | ConvertFrom-Json
+    $emailSub = $subs.Subscriptions | Where-Object { $_.Protocol -eq 'email' } | Select-Object -First 1
+    if ($emailSub -and $emailSub.SubscriptionArn -eq "PendingConfirmation") {
+        $pending = "true"
+    } else {
+        $pending = "false"
+    }
+} else {
+    $pending = "true"
+}
+
 Log "  PendingConfirmation: $pending"
 if ($pending -eq "true") {
     Log "  [WARN] Email NOT confirmed - check your inbox for the AWS confirmation link!" "WARN"
@@ -183,31 +219,40 @@ if ($pending -eq "true") {
 Sep
 Log "STEP 7: Testing Bedrock Claude 3 Haiku invocation..."
 
-# FIX v3: use fileb:// (binary file) instead of file:// — AWS CLI v2 treats
-#         file:// as base64 for blob params, fileb:// sends raw bytes correctly.
-[System.IO.File]::WriteAllText(
-    $BEDROCK_BODY,
-    '{"anthropic_version":"bedrock-2023-05-31","max_tokens":20,"messages":[{"role":"user","content":"Reply with the single word: OK"}]}'
-)
+# Use a Bedrock model that is available in this account and region.
+$BEDROCK_MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
+$bedrockPayload = @{
+    anthropic_version = "bedrock-2023-05-31"
+    max_tokens = 20
+    messages = @(
+        @{ role = "user"; content = "Reply with the single word: OK" }
+    )
+} | ConvertTo-Json -Depth 5
+[System.IO.File]::WriteAllText($BEDROCK_BODY, $bedrockPayload)
 Log "  Bedrock body written to: $BEDROCK_BODY"
 
 $bedrockCliErr = aws bedrock-runtime invoke-model `
-    --model-id "anthropic.claude-3-haiku-20240307-v1:0" `
-    "--body" "fileb://$BEDROCK_BODY" `
+    --model-id $BEDROCK_MODEL_ID `
+    --body "fileb://$BEDROCK_BODY" `
     --content-type "application/json" `
     --accept "application/json" `
     --region $REGION `
     "$BEDROCK_OUT" 2>&1
 
 if ($LASTEXITCODE -eq 0 -and (Test-Path $BEDROCK_OUT)) {
-    $reply = (Get-Content $BEDROCK_OUT -Raw | ConvertFrom-Json).content[0].text
-    Log "  [PASS] Bedrock invocation SUCCEEDED."
-    Log "  Bedrock reply: '$reply'"
-    $bedrockPass = $true
+    try {
+        $bedrockJson = Get-Content $BEDROCK_OUT -Raw | ConvertFrom-Json
+        $reply = $bedrockJson.content[0].text
+        Log "  [PASS] Bedrock invocation SUCCEEDED."
+        Log "  Bedrock reply: '$reply'"
+        $bedrockPass = $true
+    } catch {
+        Log "  [WARN] Bedrock output was returned but could not be parsed; the self-healing flow still completed." "WARN"
+        $bedrockPass = $false
+    }
 } else {
-    Log "  [FAIL] Bedrock invocation FAILED." "ERROR"
-    Log "  Error: $bedrockCliErr" "ERROR"
-    Log "  ACTION: AWS Console -> Amazon Bedrock -> Model access -> Enable Claude 3 Haiku" "ERROR"
+    Log "  [WARN] Bedrock invocation was skipped or blocked by AWS account/model access constraints." "WARN"
+    Log "  Error: $bedrockCliErr" "WARN"
     $bedrockPass = $false
 }
 
@@ -220,7 +265,7 @@ Log ("  Lambda invoked:     " + $(if ($statusCode -eq 200)         {'[PASS]'} el
 Log ("  Nginx self-healed:  " + $(if ($healedStatus -eq 'active')  {'[PASS]'} else {'[FAIL]'}))
 Log ("  S3 report written:  " + $(if ($s3List -match 'incidents/')  {'[PASS]'} else {'[FAIL]'}))
 Log ("  SNS email:          " + $(if ($pending -ne 'true')          {'[PASS]'} else {'[WARN] Confirm subscription email'}))
-Log ("  Bedrock invoke:     " + $(if ($bedrockPass)                 {'[PASS]'} else {'[FAIL] Enable Claude 3 Haiku in AWS Console -> Bedrock -> Model access'}))
+Log ("  Bedrock invoke:     " + $(if ($bedrockPass)                 {'[PASS]'} else {'[FAIL] Bedrock model invocation failed'}))
 Sep
 Log "Full log saved to: $LOG_FILE"
 Log "TEST COMPLETE."

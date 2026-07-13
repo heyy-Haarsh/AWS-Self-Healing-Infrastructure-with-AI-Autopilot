@@ -108,3 +108,18 @@ output "phase2_checklist" {
     ============================================================
   EOT
 }
+
+output "lambda_function_name" {
+  description = "Name of the orchestrator lambda function"
+  value       = aws_lambda_function.orchestrator.function_name
+}
+
+output "s3_bucket_name" {
+  description = "Name of the incident vault S3 bucket"
+  value       = aws_s3_bucket.incident_vault.id
+}
+
+output "sns_topic_arn" {
+  description = "ARN of the SNS topic for incident alerts"
+  value       = aws_sns_topic.incident_alerts.arn
+}
